@@ -41,51 +41,27 @@ def combine_csv(folder_path):
         print(df.shape)
     df.to_csv(f'./combined/{folder_path}.csv', index=False)
 
+
 def perform_fft(fs,window_size, path, band_size):
     '''
-    Performs fft over the csv data, 
+    Performs fft over the csv data
     '''
     df = pd.read_csv(path)
     
-    n_bands = (fs*0.5)/band_size
+    
     samples_per_band = 0.5*(window_size/n_bands)
+    T = 1/fs
     i = 0
-    while i < df.size: 
-        signal = df['overhang_bearing_axial'].iloc[i:i+window_size]
-        T = 1/fs
+    while i <= df.size-windowsize: 
+        signal = df['overhang_bearing_axial'].iloc[i:i+window_size]       
         fourier = np.fft.fft(signal)
         n = signal.size
-        
         freq = np.fft.fftfreq(n, d=T)
         i+=windowsize
 
 
 
-
-
-    
-# combine_csv('./330Hz')
-# downsample_csv('12.288.csv', 51200, 330)
-
-    void downSample(float *vData, uint16_t bufferSize, StaticJsonDocument<3000>& JSONdoc){
-  uint16_t freq_bands = 10; // Hz range per band
-  uint16_t n_bands = (samplingFrequency*0.5)/freq_bands;
-  uint16_t samples_per_band = 0.5*(bufferSize/n_bands);
-  double downsampledData[n_bands];
-
-  
-
-  for (uint16_t i = 0; i < n_bands+1; i++) {
-    int frequency = i * freq_bands;
-    double mag_max = 0.0;
-    for (uint16_t j = i * samples_per_band; j < (i + 1) * samples_per_band; j++) {\
-      if (vData[j] > mag_max) {
-          mag_max = vData[j];
-      }    
-    }
-    int ascii_int;
-    char tag_string[15];
-    char freq_string[10];
-    ascii_int = 65 + i;
-    tag_string[0] = ascii_int;
-    tag_string[1] = '\0';
+def bucket_fourier(band_size, fs):
+    n_bands = (fs*0.5)/band_size
+    for i in range(n_bands):
+        frequency = i * band_size
