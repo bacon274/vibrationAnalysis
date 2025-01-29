@@ -1,5 +1,9 @@
 venv/
 data/overhang/
 data/underhang/
+.DS_Store
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
 
 
