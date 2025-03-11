@@ -39,7 +39,9 @@ def combine_csv(folder_path):
         df_new = pd.read_csv(path)
         df =  pd.concat([df, df_new], ignore_index=True)
         print(df.shape)
-    df.to_csv(f'./combined/{folder_path}.csv', index=False)
+    file_name = folder_path.replace('/', '_')
+    print(file_name)
+    df.to_csv(f'./data/combined/{file_name}.csv', index=False)
 
 
 def perform_fft(fs,window_size, path, band_size):
@@ -65,3 +67,8 @@ def bucket_fourier(band_size, fs):
     n_bands = (fs*0.5)/band_size
     for i in range(n_bands):
         frequency = i * band_size
+
+
+
+
+# combine_csv('./data/fault/underhang_35g_bearing/500Hz')
