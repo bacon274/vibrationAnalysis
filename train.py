@@ -3,7 +3,7 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader, random_split
 import pandas as pd
 import numpy as np
-from models import Autoencoder
+from models import Autoencoder, CombinedLoss, HuberLoss, DTWLoss, FrequencyLoss
 import matplotlib.pyplot as plt
 from dataset import *
 import random
@@ -17,17 +17,20 @@ HYPERPARAMETERS = {
     'selected_columns': [
         'underhang_bearing_axial'
     ],
-    'sequence_length': 100,
-    
+    'sequence_length': 500,
+
+    'loss_function': HuberLoss(),#  nn.MSELoss(),
+    'normalise': True,
+    'random_sampling': True,
     # Training parameters
     'batch_size': 32,
     'learning_rate': 0.001,
-    'num_epochs': 60,
+    'num_epochs': 30,
     'train_split': 0.8,
     
     # Model parameters
-    'hidden_size': 16,
-    'latent_dim': 2,
+    'hidden_size': 64,
+    'latent_dim': 16,
     
     # Other settings
     'random_seed': 42,
@@ -64,15 +67,40 @@ def plot_reconstruction(input_seq, output_seq, epoch, loss, save_dir='reconstruc
 
 
 def reconstruct(model, sample, epoch, criterion, sample_name):
-    """Reconstruct a sample and save the reconstruction"""
+    """Reconstruct a sample and save the reconstruction with multiple error metrics"""
     with torch.no_grad():
         reconstruction = model(sample)
-        # Calculate loss for this sample
-        test_loss = criterion(reconstruction, sample).item()
+        
+        # Calculate different error metrics
+        # 1. Standard MSE loss
+        mse_loss = criterion(reconstruction, sample).item()
+        
+        # 2. Pattern loss (gradient-based)
+        input_grad = sample[:, 1:] - sample[:, :-1]
+        recon_grad = reconstruction[:, 1:] - reconstruction[:, :-1]
+        pattern_loss = torch.mean((input_grad - recon_grad) ** 2).item()
+        
+        # 3. Peak detection loss
+        peak_loss = torch.mean(torch.abs(torch.max(sample) - torch.max(reconstruction))).item()
+        
         # Move tensors to CPU and convert to numpy for plotting
-        input_seq = sample[0].cpu().numpy()  # Remove batch dimension for plotting
-        output_seq = reconstruction[0].cpu().numpy()  # Remove batch dimension for plotting
-        plot_reconstruction(input_seq, output_seq, epoch, test_loss, 'reconstructions', sample_name)
+        input_seq = sample[0].cpu().numpy()
+        output_seq = reconstruction[0].cpu().numpy()
+        
+        # Plot with all metrics
+        plt.figure(figsize=(12, 4))
+        plt.plot(input_seq, 'b-', label='Input', alpha=0.7)
+        plt.plot(output_seq, 'r-', label='Reconstruction', alpha=0.7)
+        plt.title(f'{sample_name} - Reconstruction Metrics - Epoch {epoch+1}\n' +
+                 f'Loss: {mse_loss:.6f}, Pattern: {pattern_loss:.6f}, Peak: {peak_loss:.6f}')
+        plt.xlabel('Time Step')
+        plt.ylabel('Normalized Value')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f'reconstructions/reconstruction_epoch_{epoch+1}_{sample_name}.png')
+        plt.close()
+        
+        return mse_loss, pattern_loss, peak_loss
 
 def visualize_model_architecture(params):
     """Create ASCII visualization of model architecture"""
@@ -180,6 +208,8 @@ def train_model(params=HYPERPARAMETERS):
         batch_size=params['batch_size'],
         train_split=params['train_split'],
         domain='time',
+        normalise=HYPERPARAMETERS['normalise'],
+        random_sampling=HYPERPARAMETERS['random_sampling'],
         # n_fft=(HYPERPARAMETERS['sequence_length']*2)-1,
         # return_magnitude=True
     )
@@ -192,6 +222,8 @@ def train_model(params=HYPERPARAMETERS):
         batch_size=params['batch_size'],
         train_split=1.0,  # Use all fault data for testing
         domain='time',
+        normalise=HYPERPARAMETERS['normalise'],
+        random_sampling=HYPERPARAMETERS['random_sampling'],
         # n_fft=(HYPERPARAMETERS['sequence_length']*2)-1,
         # return_magnitude=True
     )[0]  # Take only the first loader since we don't need to split fault data
@@ -204,16 +236,11 @@ def train_model(params=HYPERPARAMETERS):
         latent_dim=params['latent_dim']
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=params['learning_rate'])
-    criterion = nn.MSELoss()
+    criterion = HYPERPARAMETERS['loss_function']
     
     # Training loop
     train_losses = []
     
-    # Get a fixed test batch for visualization
-    test_batch = next(iter(test_loader))
-    test_sample = test_batch[0].unsqueeze(0).to(device)  # Add batch dimension
-    fault_test_batch = next(iter(fault_loader))
-    fault_test_sample = fault_test_batch[0].unsqueeze(0).to(device)  # Add batch dimension
     
     print("Starting training...")
     best_threshold = None
@@ -248,6 +275,14 @@ def train_model(params=HYPERPARAMETERS):
         model.eval()
         # Perform validation on fault data
         if (epoch + 1) % params['validation_frequency'] == 0:
+            test_batch = next(iter(test_loader))
+            random_idx = random.randint(0, test_batch.size(0) - 1)
+            test_sample = test_batch[random_idx].unsqueeze(0).to(device)  # Add batch dimension
+            
+            fault_test_batch = next(iter(fault_loader))
+            random_idx = random.randint(0, fault_test_batch.size(0) - 1)
+            fault_test_sample = fault_test_batch[random_idx].unsqueeze(0).to(device)  # Add batch dimension
+
             reconstruct(model, test_sample,epoch, criterion, 'normal')
             reconstruct(model, fault_test_sample,epoch, criterion, 'underhang_35g_bearing_fault')
 

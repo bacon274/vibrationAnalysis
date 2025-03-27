@@ -3,16 +3,19 @@ from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
 from scipy.fft import fft, fftfreq
+import random
 
 
 
 class VibrationDataset(Dataset):
-    def __init__(self, csv_path, selected_columns=None, sequence_length=100, normalize=True):
+    def __init__(self, csv_path, selected_columns=None, sequence_length=100, normalize=True, random_sampling=True):
         """
         Args:
             csv_path (str): Path to the CSV file
             selected_columns (list): List of column names to use. If None, uses all columns
             sequence_length (int): Length of the sequence to return
+            normalize (bool): Whether to normalize the data
+            random_sampling (bool): Whether to randomly sample sequences
         """
         # Read the CSV file
         self.df = pd.read_csv(csv_path)
@@ -24,18 +27,26 @@ class VibrationDataset(Dataset):
         # Convert to numpy array for faster processing
         self.data = self.df.values
         self.sequence_length = sequence_length
+        self.random_sampling = random_sampling
         
         if normalize:
             # Normalize each sequence independently
             self.data = (self.data - np.min(self.data, axis=0)) / (
                 np.max(self.data, axis=0) - np.min(self.data, axis=0) + 1e-8)
-        
+    
     def __len__(self):
         return len(self.data) - self.sequence_length + 1
     
     def __getitem__(self, idx):
-        # Get sequence of data
-        sequence = self.data[idx:idx + self.sequence_length]
+        if self.random_sampling:
+            # Randomly select a starting point that allows for a full sequence
+            max_start = len(self.data) - self.sequence_length
+            start_idx = random.randint(0, max_start)
+            sequence = self.data[start_idx:start_idx + self.sequence_length]
+        else:
+            # Original sequential sampling
+            sequence = self.data[idx:idx + self.sequence_length]
+        
         return torch.FloatTensor(sequence)
 
 class FrequencyDomainDataset(VibrationDataset):
@@ -71,7 +82,7 @@ class FrequencyDomainDataset(VibrationDataset):
 
 def create_data_loaders(csv_path, selected_columns=None, sequence_length=100, 
                        batch_size=32, train_split=0.8, shuffle=True,
-                       domain='time', **freq_kwargs):
+                       domain='time', normalise=True, random_sampling=True, **freq_kwargs):
     """
     Creates train and test dataloaders for either time or frequency domain data.
     
@@ -90,10 +101,10 @@ def create_data_loaders(csv_path, selected_columns=None, sequence_length=100,
     """
     # Create appropriate dataset
     if domain == 'time':
-        dataset = VibrationDataset(csv_path, selected_columns, sequence_length)
+        dataset = VibrationDataset(csv_path, selected_columns, sequence_length, normalise, random_sampling)
     elif domain == 'freq':
         dataset = FrequencyDomainDataset(csv_path, selected_columns, 
-                                       sequence_length, **freq_kwargs)
+                                       sequence_length, normalise, random_sampling, **freq_kwargs)
     else:
         raise ValueError("domain must be 'time' or 'freq'")
     
