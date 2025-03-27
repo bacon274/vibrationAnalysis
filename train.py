@@ -22,7 +22,7 @@ HYPERPARAMETERS = {
     # Training parameters
     'batch_size': 32,
     'learning_rate': 0.001,
-    'num_epochs': 30,
+    'num_epochs': 60,
     'train_split': 0.8,
     
     # Model parameters
@@ -178,7 +178,10 @@ def train_model(params=HYPERPARAMETERS):
         selected_columns=params['selected_columns'],
         sequence_length=params['sequence_length'],
         batch_size=params['batch_size'],
-        train_split=params['train_split']
+        train_split=params['train_split'],
+        domain='time',
+        # n_fft=(HYPERPARAMETERS['sequence_length']*2)-1,
+        # return_magnitude=True
     )
     
     # Create fault data loader
@@ -187,7 +190,10 @@ def train_model(params=HYPERPARAMETERS):
         selected_columns=params['selected_columns'],
         sequence_length=params['sequence_length'],
         batch_size=params['batch_size'],
-        train_split=1.0  # Use all fault data for testing
+        train_split=1.0,  # Use all fault data for testing
+        domain='time',
+        # n_fft=(HYPERPARAMETERS['sequence_length']*2)-1,
+        # return_magnitude=True
     )[0]  # Take only the first loader since we don't need to split fault data
     
     # Initialize model, optimizer, and loss function

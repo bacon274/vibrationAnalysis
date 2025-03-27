@@ -7,7 +7,7 @@ from scipy.fft import fft, fftfreq
 
 
 class VibrationDataset(Dataset):
-    def __init__(self, csv_path, selected_columns=None, sequence_length=100):
+    def __init__(self, csv_path, selected_columns=None, sequence_length=100, normalize=True):
         """
         Args:
             csv_path (str): Path to the CSV file
@@ -24,6 +24,11 @@ class VibrationDataset(Dataset):
         # Convert to numpy array for faster processing
         self.data = self.df.values
         self.sequence_length = sequence_length
+        
+        if normalize:
+            # Normalize each sequence independently
+            self.data = (self.data - np.min(self.data, axis=0)) / (
+                np.max(self.data, axis=0) - np.min(self.data, axis=0) + 1e-8)
         
     def __len__(self):
         return len(self.data) - self.sequence_length + 1
@@ -61,9 +66,6 @@ class FrequencyDomainDataset(VibrationDataset):
         if self.return_magnitude:
             # Convert to magnitude spectrum
             freq_domain = np.abs(freq_domain)
-        # else:
-        #     # Stack real and imaginary parts
-        #     freq_domain = np.stack((freq_domain.real, freq_domain.imag), axis=-1)
             
         return torch.FloatTensor(freq_domain)
 
