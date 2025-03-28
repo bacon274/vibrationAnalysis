@@ -30,9 +30,9 @@ class VibrationDataset(Dataset):
         self.random_sampling = random_sampling
         
         if normalize:
-            # Normalize each sequence independently
-            self.data = (self.data - np.min(self.data, axis=0)) / (
-                np.max(self.data, axis=0) - np.min(self.data, axis=0) + 1e-8)
+            # Normalize to range [-10, 10]
+            abs_max = np.maximum(np.abs(np.min(self.data, axis=0)), np.abs(np.max(self.data, axis=0)))
+            self.data = (self.data / (abs_max + 1e-8)) * 10  # Scale to [-10, 10] instead of [-1, 1]
     
     def __len__(self):
         return len(self.data) - self.sequence_length + 1

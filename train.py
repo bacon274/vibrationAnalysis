@@ -3,7 +3,7 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader, random_split
 import pandas as pd
 import numpy as np
-from models import Autoencoder, CombinedLoss, HuberLoss, DTWLoss, FrequencyLoss
+from models import Autoencoder, CombinedLoss, HuberLoss, DTWLoss, FrequencyLoss, CombinedDTWLoss
 import matplotlib.pyplot as plt
 from dataset import *
 import random
@@ -17,10 +17,10 @@ HYPERPARAMETERS = {
     'selected_columns': [
         'underhang_bearing_axial'
     ],
-    'sequence_length': 500,
+    'sequence_length': 128,
 
-    'loss_function': HuberLoss(),#  nn.MSELoss(),
-    'normalise': True,
+    'loss_function': CombinedDTWLoss(alpha=0.2), # Reduced alpha to emphasize L1 loss
+    'normalise': False,
     'random_sampling': True,
     # Training parameters
     'batch_size': 32,
@@ -30,7 +30,8 @@ HYPERPARAMETERS = {
     
     # Model parameters
     'hidden_size': 64,
-    'latent_dim': 16,
+    'latent_dim': 12,
+    'num_layers': 4,  # Number of hidden layers in encoder/decoder
     
     # Other settings
     'random_seed': 42,
@@ -67,40 +68,35 @@ def plot_reconstruction(input_seq, output_seq, epoch, loss, save_dir='reconstruc
 
 
 def reconstruct(model, sample, epoch, criterion, sample_name):
-    """Reconstruct a sample and save the reconstruction with multiple error metrics"""
+    """Reconstruct a sample and save the reconstruction with the specified loss function"""
     with torch.no_grad():
         reconstruction = model(sample)
         
-        # Calculate different error metrics
-        # 1. Standard MSE loss
-        mse_loss = criterion(reconstruction, sample).item()
-        
-        # 2. Pattern loss (gradient-based)
-        input_grad = sample[:, 1:] - sample[:, :-1]
-        recon_grad = reconstruction[:, 1:] - reconstruction[:, :-1]
-        pattern_loss = torch.mean((input_grad - recon_grad) ** 2).item()
-        
-        # 3. Peak detection loss
-        peak_loss = torch.mean(torch.abs(torch.max(sample) - torch.max(reconstruction))).item()
+        # Calculate loss using the specified criterion
+        loss = criterion(reconstruction, sample).item()
         
         # Move tensors to CPU and convert to numpy for plotting
         input_seq = sample[0].cpu().numpy()
         output_seq = reconstruction[0].cpu().numpy()
         
-        # Plot with all metrics
+        # Get the name of the loss function
+        loss_name = criterion.__class__.__name__
+        
+        # Plot with loss metric
         plt.figure(figsize=(12, 4))
         plt.plot(input_seq, 'b-', label='Input', alpha=0.7)
         plt.plot(output_seq, 'r-', label='Reconstruction', alpha=0.7)
-        plt.title(f'{sample_name} - Reconstruction Metrics - Epoch {epoch+1}\n' +
-                 f'Loss: {mse_loss:.6f}, Pattern: {pattern_loss:.6f}, Peak: {peak_loss:.6f}')
+        plt.title(f'{sample_name} - {loss_name} - Epoch {epoch+1}\n' +
+                 f'Loss: {loss:.6f}')
         plt.xlabel('Time Step')
         plt.ylabel('Normalized Value')
+
         plt.legend()
         plt.grid(True)
         plt.savefig(f'reconstructions/reconstruction_epoch_{epoch+1}_{sample_name}.png')
         plt.close()
         
-        return mse_loss, pattern_loss, peak_loss
+        return loss
 
 def visualize_model_architecture(params):
     """Create ASCII visualization of model architecture"""
@@ -108,37 +104,62 @@ def visualize_model_architecture(params):
     n_features = len(params['selected_columns'])
     hidden_size = params['hidden_size']
     latent_dim = params['latent_dim']
+    num_layers = params['num_layers']
     input_dim = sequence_length * n_features
+    
+    # Calculate layer dimensions for visualization
+    def calculate_layer_dims(start_dim, end_dim, num_layers):
+        if num_layers == 1:
+            return [start_dim, end_dim]
+        ratio = (end_dim / start_dim) ** (1 / (num_layers))
+        dims = [int(start_dim * (ratio ** i)) for i in range(num_layers + 1)]
+        return dims
+    
+    # Get encoder and decoder dimensions
+    encoder_dims = calculate_layer_dims(input_dim, latent_dim, num_layers)
+    decoder_dims = calculate_layer_dims(latent_dim, input_dim, num_layers)
     
     print("\nModel Architecture:")
     print("=" * 80)
-    print(f"""
-Input Signal ({sequence_length} timesteps × {n_features} features = {input_dim})
-    ↓
-[Encoder]
-    ↓
-Hidden Layer 1 ({hidden_size * 2} units)
-    ↓ ReLU
-Hidden Layer 2 ({hidden_size} units)
-    ↓ ReLU
-Latent Space ({latent_dim} units) ← Compressed Representation
-    ↓
-[Decoder]
-    ↓
-Hidden Layer 3 ({hidden_size} units)
-    ↓ ReLU
-Hidden Layer 4 ({hidden_size * 2} units)
-    ↓ ReLU
-Output Signal ({sequence_length} timesteps × {n_features} features = {input_dim})
-    """)
-    print("=" * 80)
     
+    # Build the architecture string
+    architecture = f"""
+        Input Signal ({sequence_length} timesteps × {n_features} features = {input_dim})
+            ↓
+        [Encoder]"""
+    
+    # Add encoder layers
+    for i in range(num_layers):
+        architecture += f"""
+            ↓
+        Hidden Layer E{i+1} ({encoder_dims[i+1]} units)
+            ↓ ReLU"""
+    
+    architecture += f"""
+        Latent Space ({latent_dim} units) ← Compressed Representation
+            ↓
+        [Decoder]"""
+    
+    # Add decoder layers
+    for i in range(num_layers):
+        architecture += f"""
+            ↓
+        Hidden Layer D{i+1} ({decoder_dims[i+1]} units)
+            ↓ ReLU"""
+    
+    architecture += f"""
+        Output Signal ({sequence_length} timesteps × {n_features} features = {input_dim})
+            """
+    
+    print(architecture)
+    print("=" * 80)
+            
     # Calculate compression ratio
     compression_ratio = input_dim / latent_dim
     print(f"Compression ratio: {compression_ratio:.1f}:1 ({input_dim} → {latent_dim})")
 
-def calculate_reconstruction_errors(model, dataloader, device):
-    """Calculate reconstruction errors for a dataset"""
+def calculate_reconstruction_errors(model, dataloader, device, criterion):
+    """Calculate reconstruction errors for a dataset using the specified loss function"""
     model.eval()
     reconstruction_errors = []
     
@@ -146,17 +167,18 @@ def calculate_reconstruction_errors(model, dataloader, device):
         for batch in dataloader:
             batch = batch.to(device)
             reconstruction = model(batch)
-            # Calculate MSE for each sequence in the batch
-            errors = torch.mean((batch - reconstruction) ** 2, dim=(1, 2))
-            reconstruction_errors.extend(errors.cpu().numpy())
+            # Calculate loss using the specified criterion
+            # L1Loss returns a scalar per batch, so we don't need to take mean across dimensions
+            errors = criterion(reconstruction, batch)
+            reconstruction_errors.extend([errors.item()])
     
     return np.array(reconstruction_errors)
 
 def evaluate_anomaly_detection(model, normal_loader, fault_loader, threshold, device):
     """Evaluate anomaly detection performance"""
     # Calculate reconstruction errors for normal and fault data
-    normal_errors = calculate_reconstruction_errors(model, normal_loader, device)
-    fault_errors = calculate_reconstruction_errors(model, fault_loader, device)
+    normal_errors = calculate_reconstruction_errors(model, normal_loader, device, HYPERPARAMETERS['loss_function'])
+    fault_errors = calculate_reconstruction_errors(model, fault_loader, device, HYPERPARAMETERS['loss_function'])
     
     # Calculate metrics
     normal_predictions = (normal_errors > threshold).astype(int)
@@ -176,15 +198,18 @@ def evaluate_anomaly_detection(model, normal_loader, fault_loader, threshold, de
         'fault_errors': fault_errors
     }
 
-def plot_error_distributions(normal_errors, fault_errors, threshold, epoch, save_dir='validation'):
+def plot_error_distributions(normal_errors, fault_errors, threshold, epoch, criterion, save_dir='validation'):
     """Plot distribution of reconstruction errors"""
     os.makedirs(save_dir, exist_ok=True)
+    
+    # Get the name of the loss function
+    loss_name = criterion.__class__.__name__
     
     plt.figure(figsize=(10, 6))
     plt.hist(normal_errors, bins=50, alpha=0.5, label='Normal', density=True)
     plt.hist(fault_errors, bins=50, alpha=0.5, label='Fault', density=True)
     plt.axvline(threshold, color='r', linestyle='--', label=f'Threshold: {threshold:.4f}')
-    plt.title(f'Reconstruction Error Distribution - Epoch {epoch+1}')
+    plt.title(f'Reconstruction Error Distribution ({loss_name}) - Epoch {epoch+1}')
     plt.xlabel('Reconstruction Error')
     plt.ylabel('Density')
     plt.legend()
@@ -233,7 +258,8 @@ def train_model(params=HYPERPARAMETERS):
         sequence_length=params['sequence_length'],
         n_features=len(params['selected_columns']),
         hidden_dim=params['hidden_size'],
-        latent_dim=params['latent_dim']
+        latent_dim=params['latent_dim'],
+        num_layers=params['num_layers']
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=params['learning_rate'])
     criterion = HYPERPARAMETERS['loss_function']
@@ -287,7 +313,7 @@ def train_model(params=HYPERPARAMETERS):
             reconstruct(model, fault_test_sample,epoch, criterion, 'underhang_35g_bearing_fault')
 
             # Calculate reconstruction errors on validation set
-            val_errors = calculate_reconstruction_errors(model, test_loader, device)
+            val_errors = calculate_reconstruction_errors(model, test_loader, device, HYPERPARAMETERS['loss_function'])
             
             # Set threshold based on normal data distribution
             threshold = np.percentile(val_errors, params['reconstruction_error_percentile'])
@@ -300,7 +326,8 @@ def train_model(params=HYPERPARAMETERS):
                 metrics['normal_errors'],
                 metrics['fault_errors'],
                 threshold,
-                epoch
+                epoch,
+                HYPERPARAMETERS['loss_function']
             )
             
             print(f"\nValidation Metrics (Epoch {epoch+1}):")
@@ -344,3 +371,4 @@ def train_model(params=HYPERPARAMETERS):
 if __name__ == "__main__":
     visualize_model_architecture(HYPERPARAMETERS)
     train_model()
+
