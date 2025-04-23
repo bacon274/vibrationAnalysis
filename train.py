@@ -352,7 +352,7 @@ def train_model(params=HYPERPARAMETERS):
     plt.savefig('training_loss.png')
     plt.close()
     
-    # Save the final model with the best threshold
+    # Save the model
     torch.save({
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
@@ -360,13 +360,12 @@ def train_model(params=HYPERPARAMETERS):
         'final_loss': train_losses[-1],
         'anomaly_threshold': best_threshold,
         'best_metrics': best_metrics
-    }, 'autoencoder_model.pth')
+    }, 'autoencoder_checkpoint.pth')
     
-    print("\nFinal Best Metrics:")
-    print(f"Threshold: {best_threshold:.4f}")
-    print(f"False Positive Rate: {best_metrics['fpr']:.4f}")
-    print(f"True Positive Rate: {best_metrics['tpr']:.4f}")
-    print("Model and training info saved to autoencoder_model.pth")
+    # Also save just the model state dict for easier conversion
+    torch.save(model.state_dict(), 'autoencoder_model.pth')
+    
+    print(f"Model saved to autoencoder_model.pth")
 
 if __name__ == "__main__":
     visualize_model_architecture(HYPERPARAMETERS)
