@@ -19,7 +19,7 @@ HYPERPARAMETERS = {
     ],
     'sequence_length': 128,
 
-    'loss_function': CombinedDTWLoss(alpha=0.2), # Reduced alpha to emphasize L1 loss
+    'loss_function': nn.MSELoss(), # CombinedDTWLoss(alpha=0.2), # Reduced alpha to emphasize L1 loss
     'normalise': False,
     'random_sampling': True,
     # Training parameters
@@ -45,6 +45,8 @@ HYPERPARAMETERS = {
     # Validation parameters
     'validation_frequency': 5,  # Validate every N epochs
     'reconstruction_error_percentile': 95,  # For threshold calculation
+
+    'validate': False
 }
 
 # Add input_size after dictionary definition
@@ -300,7 +302,7 @@ def train_model(params=HYPERPARAMETERS):
         # Evaluate and plot a test sample
         model.eval()
         # Perform validation on fault data
-        if (epoch + 1) % params['validation_frequency'] == 0:
+        if (epoch + 1) % params['validation_frequency'] == 0 and params['validate']:
             test_batch = next(iter(test_loader))
             random_idx = random.randint(0, test_batch.size(0) - 1)
             test_sample = test_batch[random_idx].unsqueeze(0).to(device)  # Add batch dimension

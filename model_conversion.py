@@ -13,20 +13,32 @@ def convert_pytorch_to_onnx(pytorch_model_path, onnx_model_path, input_shape):
     Args:
         pytorch_model_path (str): Path to the PyTorch model file
         onnx_model_path (str): Path to save the ONNX model
-        input_shape (tuple): Shape of the input tensor (batch_size, channels, sequence_length)
+        input_shape (tuple): Shape of the input tensor (batch_size, sequence_length, n_features)
     """
     # Add MSELoss to safe globals
     torch.serialization.add_safe_globals([MSELoss])
     
-    # Load the model state dictionary
-    state_dict = torch.load(pytorch_model_path, weights_only=False)
+    # Load the checkpoint
+    checkpoint = torch.load(pytorch_model_path, weights_only=False)
+    
+    # Extract model state dict from checkpoint
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        state_dict = checkpoint['model_state_dict']
+    else:
+        state_dict = checkpoint
     
     # Create model instance and load state dict
-    model = Autoencoder()  # Create an instance of your model
+    model = Autoencoder(
+        sequence_length=input_shape[1],  # Use sequence_length from input_shape
+        n_features=input_shape[2],       # Use n_features from input_shape
+        hidden_dim=64,
+        latent_dim=12,
+        num_layers=4
+    )
     model.load_state_dict(state_dict)
     model.eval()  # Set to evaluation mode
     
-    # Create dummy input
+    # Create dummy input with correct shape
     dummy_input = torch.randn(input_shape)
     
     # Export to ONNX
@@ -40,8 +52,8 @@ def convert_pytorch_to_onnx(pytorch_model_path, onnx_model_path, input_shape):
         input_names=['input'],
         output_names=['output'],
         dynamic_axes={
-            'input': {0: 'batch_size', 2: 'sequence_length'},
-            'output': {0: 'batch_size', 2: 'sequence_length'}
+            'input': {0: 'batch_size'},
+            'output': {0: 'batch_size'}
         }
     )
     
@@ -62,7 +74,6 @@ def convert_onnx_to_tensorflow(onnx_model_path, tf_model_path):
     onnx2tf.convert(
         input_onnx_file_path=onnx_model_path,
         output_folder_path=tf_model_path,
-        output_format='tf_saved_model',
         copy_onnx_input_output_names_to_tflite=True,
         non_verbose=True
     )
@@ -75,14 +86,15 @@ def convert_tf_to_tflite(tf_model_path, tflite_model_path, input_shape):
     Args:
         tf_model_path (str): Path to the TensorFlow model
         tflite_model_path (str): Path to save the TensorFlow Lite model
-        input_shape (tuple): Shape of the input tensor (batch_size, channels, sequence_length)
+        input_shape (tuple): Shape of the input tensor (batch_size, sequence_length, n_features)
     """
     # Load the TensorFlow model
     model = tf.saved_model.load(tf_model_path)
     concrete_func = model.signatures[tf.saved_model.DEFAULT_SERVING_SIGNATURE_DEF_KEY]
     
-    # Set the input shape
-    concrete_func.inputs[0].set_shape(input_shape)
+    # Get the expected input shape from the model
+    expected_shape = concrete_func.inputs[0].shape
+    print(f"Model expects input shape: {expected_shape}")
     
     # Create converter
     converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func])
@@ -101,14 +113,13 @@ def convert_tf_to_tflite(tf_model_path, tflite_model_path, input_shape):
 
 def main():
     # Define paths
-    pytorch_model_path = "autoencoder_model.pth"
-    onnx_model_path = "autoencoder_model.onnx"
-    tf_model_path = "autoencoder_model_tf"
-    tflite_model_path = "autoencoder_model.tflite"
+    pytorch_model_path = "autoencoder_checkpoint.pth"
+    onnx_model_path = "autoencoder_checkpoint.onnx"
+    tf_model_path = "autoencoder_checkpoint_tf"
+    tflite_model_path = "autoencoder_checkpoint.tflite"
     
-    # Define input shape (adjust based on your model's expected input)
-    # Format: (batch_size, channels, sequence_length)
-    input_shape = (128, 1, 1)  # Example shape, adjust as needed
+    # Define input shape (batch_size, sequence_length, n_features)
+    input_shape = (1, 128, 1)  # Example: batch_size=1, sequence_length=128, n_features=1
     
     # Convert PyTorch to ONNX
     convert_pytorch_to_onnx(pytorch_model_path, onnx_model_path, input_shape)
