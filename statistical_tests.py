@@ -67,6 +67,7 @@ def perform_statistical_tests(dfs, column_names):
             if column not in df.columns:
                 raise ValueError(f"Column '{column}' not found in DataFrame '{df.attrs['name']}'")
             else:
+                # Check normal distribution of the data in the column
                 stat,outcome = check_normality(df, column)
                 # plot_distribution(df, column, df.attrs['name'])
                 distribution_results = {
@@ -76,6 +77,8 @@ def perform_statistical_tests(dfs, column_names):
                     "Normality Outcome": outcome }
             
                 dist_results_table.append(distribution_results)
+
+                
             
        
     # Convert the results list to a DataFrame and print it
