@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 from dataset import *
 import random
 import os
+from sklearn.metrics import precision_score, recall_score, f1_score
+
 
 
 # Hyperparameters and Configuration
@@ -182,11 +184,20 @@ def evaluate_anomaly_detection(model, normal_loader, fault_loader, threshold, de
     normal_errors = calculate_reconstruction_errors(model, normal_loader, device, HYPERPARAMETERS['loss_function'])
     fault_errors = calculate_reconstruction_errors(model, fault_loader, device, HYPERPARAMETERS['loss_function'])
     
-    # Calculate metrics
+    # Predictions: 1 = Anomaly, 0 = Normal
     normal_predictions = (normal_errors > threshold).astype(int)
     fault_predictions = (fault_errors > threshold).astype(int)
     
-    # Calculate false positive rate (FPR) and true positive rate (TPR)
+    # Combine predictions and ground truth
+    y_pred = np.concatenate([normal_predictions, fault_predictions])
+    y_true = np.concatenate([np.zeros_like(normal_predictions), np.ones_like(fault_predictions)])
+    
+    # Compute metrics
+    precision = precision_score(y_true, y_pred, zero_division=0)
+    recall = recall_score(y_true, y_pred, zero_division=0)
+    f1 = f1_score(y_true, y_pred, zero_division=0)
+    
+    # Calculate FPR and TPR separately for interpretability
     fpr = np.mean(normal_predictions)  # False positive rate on normal data
     tpr = np.mean(fault_predictions)   # True positive rate on fault data
     
@@ -194,6 +205,9 @@ def evaluate_anomaly_detection(model, normal_loader, fault_loader, threshold, de
         'threshold': threshold,
         'fpr': fpr,
         'tpr': tpr,
+        'precision': precision,
+        'recall': recall,
+        'f1_score': f1,
         'normal_mean_error': np.mean(normal_errors),
         'fault_mean_error': np.mean(fault_errors),
         'normal_errors': normal_errors,
